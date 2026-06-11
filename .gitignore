@@ -4,3 +4,4 @@ dist/
 build/
 .env
 .env.*
+_corgi_preview.png

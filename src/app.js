@@ -367,8 +367,14 @@ function parseRoute() {
   return { page, a, b };
 }
 
-function navigate(path) {
-  location.hash = `#/${path}`;
+function navigate(path, replace) {
+  if (replace) {
+    history.replaceState(null, "", `#/${path}`);
+    state.route = parseRoute();
+    render();
+  } else {
+    location.hash = `#/${path}`;
+  }
 }
 
 function read(key, fallback) {
@@ -444,19 +450,28 @@ function loadVoices() {
 }
 
 function chooseEnglishVoice(voices) {
+  // 优先挑清澈自然的高质量音色
   const rankedNames = [
     "Google US English",
-    "Microsoft Jenny Online",
-    "Microsoft Aria Online",
+    "Microsoft Aria Online (Natural)",
+    "Microsoft Jenny Online (Natural)",
+    "Microsoft Emma Online (Natural)",
+    "Microsoft Ava Online (Natural)",
+    "Microsoft Michelle Online (Natural)",
+    "Microsoft Aria",
+    "Microsoft Jenny",
     "Samantha",
+    "Ava (Enhanced)",
+    "Ava (Premium)",
     "Ava",
     "Allison",
-    "Karen",
-    "Daniel"
+    "Karen"
   ];
   const english = voices.filter((voice) => /^en[-_]/i.test(voice.lang));
   return rankedNames.map((name) => english.find((voice) => voice.name.includes(name))).find(Boolean)
-    || english.find((voice) => voice.lang === "en-US" && voice.localService)
+    // 退而求其次：任何带 Natural / Online 的英语音色
+    || english.find((voice) => /natural|online/i.test(voice.name))
+    || english.find((voice) => voice.lang === "en-US" && !voice.localService)
     || english.find((voice) => voice.lang === "en-US")
     || english[0];
 }
@@ -469,8 +484,8 @@ async function speak(text) {
   const utterance = new SpeechSynthesisUtterance(text.replace(/\n/g, ". "));
   utterance.lang = "en-US";
   utterance.voice = voice || null;
-  utterance.rate = 0.92;
-  utterance.pitch = 1.02;
+  utterance.rate = 0.95;
+  utterance.pitch = 1.08;
   utterance.volume = 1;
   window.speechSynthesis.speak(utterance);
   if (!voiceReady) {
@@ -714,6 +729,39 @@ function render() {
   bind();
 }
 
+function Corgi() {
+  return `
+    <div class="pet" aria-hidden="true">
+      <div class="pet-stroll">
+        <div class="pet-hop">
+          <svg class="corgi" viewBox="0 0 132 100">
+            <path d="M18 50 q-13 -3 -16 -17 q11 1 20 8 z" fill="#E89B45"/>
+            <g class="legs legs-back">
+              <rect x="27" y="60" width="11" height="27" rx="5" fill="#F6E7CE"/>
+              <rect x="43" y="60" width="11" height="27" rx="5" fill="#E7D4B4"/>
+            </g>
+            <g class="legs legs-front">
+              <rect x="84" y="60" width="11" height="27" rx="5" fill="#F6E7CE"/>
+              <rect x="98" y="60" width="11" height="27" rx="5" fill="#E7D4B4"/>
+            </g>
+            <ellipse cx="58" cy="52" rx="46" ry="26" fill="#EE9E4A"/>
+            <path d="M15 56 q43 26 86 0 q-7 18 -43 18 q-36 0 -43 -18z" fill="#FBEFD8"/>
+            <circle cx="101" cy="44" r="22" fill="#EE9E4A"/>
+            <path d="M89 28 L96 3 L113 24 q-9 4 -24 4z" fill="#E2873A"/>
+            <path d="M95 22 L98 9 L107 21 z" fill="#F6C9A6"/>
+            <ellipse cx="117" cy="53" rx="13" ry="11" fill="#FBEFD8"/>
+            <ellipse cx="127" cy="50" rx="3.4" ry="2.8" fill="#3B2A24"/>
+            <path d="M121 57 q4 5 8 2" stroke="#3B2A24" stroke-width="1.6" fill="none" stroke-linecap="round"/>
+            <circle cx="105" cy="40" r="3.1" fill="#3B2A24"/>
+            <circle cx="106" cy="39" r="1" fill="#fff"/>
+            <circle cx="92" cy="51" r="4" fill="#F7B9A0" opacity="0.7"/>
+          </svg>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
 function Home() {
   return shell(`
     <section class="brand">
@@ -722,6 +770,7 @@ function Home() {
         <h1>接嘎</h1>
         <p>接住尴尬，开口不尴尬</p>
       </div>
+      ${Corgi()}
     </section>
     <section class="headline">
       <h2>今天想接住哪个尴尬场景？</h2>
@@ -785,7 +834,7 @@ function SceneDetail() {
 }
 
 function tabButton(label, path, active) {
-  return `<button class="${active ? "active" : ""}" data-go="${path}">${label}</button>`;
+  return `<button class="${active ? "active" : ""}" data-tab="${path}">${label}</button>`;
 }
 
 function EntryCard(entry) {
@@ -922,7 +971,7 @@ function Practice() {
       <button data-speak="${entry.id}">${icon("volume")}听朗读想意思</button>
       <button data-flip-button>翻牌</button>
       <button class="primary" data-done="${entry.id}">${icon("check")}我掌握了</button>
-      <button data-go="practice/${filter}/${randomSeed()}">随机下一张</button>
+      <button data-replace="practice/${filter}/${randomSeed()}">随机下一张</button>
       <button data-checkin>完成今日练习</button>
     </div>
   `);
@@ -932,7 +981,7 @@ function PracticeFilter(active) {
   const chips = [["all", "全部"], ...scenes.map((scene) => [scene.id, scene.name])];
   return `
     <section class="practice-filter">
-      ${chips.map(([id, label]) => `<button class="${active === id ? "active" : ""}" data-go="practice/${id}/${randomSeed()}">${label}</button>`).join("")}
+      ${chips.map(([id, label]) => `<button class="${active === id ? "active" : ""}" data-replace="practice/${id}/${randomSeed()}">${label}</button>`).join("")}
     </section>
   `;
 }
@@ -1070,7 +1119,7 @@ function Auth() {
       <input id="auth-email" class="auth-input" type="email" placeholder="邮箱" autocomplete="email" />
       <input id="auth-pass" class="auth-input" type="password" placeholder="密码（至少 6 位）" autocomplete="${mode === "register" ? "new-password" : "current-password"}" />
       <button class="primary auth-submit" data-auth="${mode}">${mode === "register" ? "注册" : "登录"}</button>
-      <button class="auth-switch" data-go="auth/${mode === "register" ? "login" : "register"}">
+      <button class="auth-switch" data-replace="auth/${mode === "register" ? "login" : "register"}">
         ${mode === "register" ? "已有账号？去登录" : "还没有账号？去注册"}
       </button>
     </section>
@@ -1148,6 +1197,8 @@ function toast(text) {
 
 function bind() {
   document.querySelectorAll("[data-go]").forEach((el) => el.addEventListener("click", () => navigate(el.dataset.go)));
+  document.querySelectorAll("[data-tab]").forEach((el) => el.addEventListener("click", () => navigate(el.dataset.tab, true)));
+  document.querySelectorAll("[data-replace]").forEach((el) => el.addEventListener("click", () => navigate(el.dataset.replace, true)));
   document.querySelectorAll("[data-back]").forEach((el) => el.addEventListener("click", () => {
     const before = location.hash;
     history.back();

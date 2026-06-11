@@ -1272,6 +1272,54 @@ button:focus:not(:focus-visible) {
   cursor: pointer;
 }
 
+/* ---------- 首页柯基宠物动效 ---------- */
+.pet {
+  position: absolute;
+  right: 12px;
+  bottom: 8px;
+  z-index: 1;
+  width: 92px;
+  pointer-events: none;
+}
+.pet-stroll {
+  animation: corgi-stroll 7.5s ease-in-out infinite;
+}
+.pet-hop {
+  animation: corgi-hop 0.34s ease-in-out infinite;
+}
+.corgi {
+  display: block;
+  width: 100%;
+  height: auto;
+  filter: drop-shadow(0 6px 6px rgba(0, 0, 0, 0.18));
+}
+.legs {
+  transform-box: fill-box;
+  transform-origin: 50% 6%;
+  animation: corgi-leg 0.34s ease-in-out infinite alternate;
+}
+.legs-back {
+  animation-direction: alternate-reverse;
+}
+@keyframes corgi-leg {
+  from { transform: rotate(-20deg); }
+  to { transform: rotate(20deg); }
+}
+@keyframes corgi-hop {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-9px); }
+}
+@keyframes corgi-stroll {
+  0% { transform: translateX(0) scaleX(-1); }
+  45% { transform: translateX(-80px) scaleX(-1); }
+  50% { transform: translateX(-80px) scaleX(1); }
+  95% { transform: translateX(0) scaleX(1); }
+  100% { transform: translateX(0) scaleX(-1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pet-stroll, .pet-hop, .legs { animation: none; }
+}
+
 /* 无底部导航的页面，去掉为导航预留的空白 */
 .screen.no-nav {
   padding-bottom: 28px;
