@@ -106,7 +106,6 @@ button {
   color: #bfdbfe;
 }
 
-.brand-mark,
 .scene-icon {
   display: grid;
   width: 48px;
@@ -114,18 +113,6 @@ button {
   place-items: center;
   border-radius: 16px;
   background: rgba(255, 255, 255, 0.14);
-}
-
-.brand-mark {
-  width: 58px;
-  height: 58px;
-  color: white;
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16);
-}
-
-.brand-mark .icon-svg {
-  width: 28px;
-  height: 28px;
 }
 
 .headline {
@@ -1087,5 +1074,385 @@ button {
   .bottom-nav {
     border-right: 1px solid var(--line);
     border-left: 1px solid var(--line);
+  }
+}
+
+/* ============================================================
+   UI 优化层 · 视觉精致度 / 动效与交互 / 信息层级与可读性
+   （仅追加覆盖，不改动原有结构与逻辑）
+   ============================================================ */
+
+:root {
+  /* 缓动与分级阴影：让层级更统一、更柔和 */
+  --ease: cubic-bezier(0.22, 0.61, 0.36, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --shadow-sm: 0 4px 12px rgba(15, 23, 42, 0.05);
+  --shadow-md: 0 14px 30px rgba(15, 23, 42, 0.08);
+  --shadow-lg: 0 24px 54px rgba(15, 23, 42, 0.13);
+  /* 略微加深次要文字，提升对比度与可读性 */
+  --muted: #5b6573;
+}
+
+body {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+/* 数字统一为等宽，避免计数跳动 */
+.today-card strong,
+.stat-row strong,
+.stat-grid strong,
+.profile-stats strong,
+.scene-meta b,
+.detail-card h2,
+.front strong,
+.back strong {
+  font-feature-settings: "tnum" 1, "ss01" 1;
+}
+
+/* ---------- 全局交互反馈 ---------- */
+button {
+  transition: transform 0.16s var(--ease), box-shadow 0.22s var(--ease),
+    background 0.2s var(--ease), color 0.2s var(--ease), filter 0.2s var(--ease);
+}
+
+button:active {
+  transform: scale(0.96);
+}
+
+.scene-card,
+.entry-card,
+.today-card,
+.setting-row,
+.profile-stats div {
+  transition: transform 0.18s var(--ease), box-shadow 0.24s var(--ease),
+    background 0.2s var(--ease);
+}
+
+.scene-card:active,
+.today-card:active,
+.flip-card:active {
+  transform: scale(0.985);
+}
+
+/* 焦点可见性（键盘可达性） */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 12px;
+}
+button:focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* 桌面端 hover 提升 */
+@media (hover: hover) {
+  .scene-card:hover {
+    transform: translateY(-3px);
+    box-shadow: var(--shadow-lg);
+  }
+  .entry-card:hover,
+  .today-card:hover,
+  .profile-stats div:hover {
+    box-shadow: var(--shadow-md);
+  }
+  .setting-row:hover {
+    background: #f8fafc;
+  }
+  .bottom-nav button:hover {
+    color: var(--accent);
+  }
+  .primary:hover {
+    filter: brightness(1.06) saturate(1.04);
+  }
+  .practice-filter button:hover,
+  .tabs button:hover {
+    color: var(--ink);
+  }
+}
+
+/* ---------- 页面进入动画 ---------- */
+.screen {
+  animation: screen-in 0.36s var(--ease) both;
+}
+@keyframes screen-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* 列表 / 网格卡片逐个渐入，强化阅读节奏 */
+.scene-grid .scene-card,
+.list .entry-card,
+.profile-stats div,
+.stat-row div {
+  animation: card-in 0.42s var(--ease) both;
+}
+.scene-grid .scene-card:nth-child(1),
+.list .entry-card:nth-child(1) { animation-delay: 0.02s; }
+.scene-grid .scene-card:nth-child(2),
+.list .entry-card:nth-child(2) { animation-delay: 0.06s; }
+.scene-grid .scene-card:nth-child(3),
+.list .entry-card:nth-child(3) { animation-delay: 0.1s; }
+.scene-grid .scene-card:nth-child(4),
+.list .entry-card:nth-child(4) { animation-delay: 0.14s; }
+.scene-grid .scene-card:nth-child(5),
+.list .entry-card:nth-child(5) { animation-delay: 0.18s; }
+.scene-grid .scene-card:nth-child(6),
+.list .entry-card:nth-child(6) { animation-delay: 0.22s; }
+@keyframes card-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* 进度条加载式增长 */
+.meter span,
+.scene-card i b {
+  transform-origin: left center;
+  animation: bar-grow 0.85s var(--ease) both;
+}
+@keyframes bar-grow {
+  from { transform: scaleX(0); }
+  to { transform: scaleX(1); }
+}
+
+/* ---------- 收藏弹跳 + 填充 ---------- */
+.saved .icon-svg {
+  fill: currentColor;
+  animation: heart-pop 0.4s var(--ease-spring);
+}
+@keyframes heart-pop {
+  0% { transform: scale(1); }
+  35% { transform: scale(1.35); }
+  100% { transform: scale(1); }
+}
+
+/* ---------- 选项卡 / 筛选 chip 细节 ---------- */
+.tabs .active {
+  box-shadow: var(--shadow-sm);
+}
+.practice-filter .active {
+  box-shadow: 0 8px 18px rgba(37, 99, 235, 0.22);
+}
+
+/* ---------- Toast 进入动画 ---------- */
+.toast {
+  animation: toast-in 0.3s var(--ease) both;
+  box-shadow: var(--shadow-lg);
+  backdrop-filter: blur(6px);
+}
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* ---------- 翻牌增加微光层次 ---------- */
+.front, .back {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18), var(--shadow-md);
+}
+
+/* ---------- 可读性微调 ---------- */
+.scene-card em { color: #313a47; }
+.dialog-cn, .sentence-pair span { color: #5b6573; }
+
+.profile-card[data-go],
+.avatar[data-account-action] {
+  cursor: pointer;
+}
+
+/* ---------- 资料编辑页 ---------- */
+.edit-card {
+  display: grid;
+  gap: 10px;
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  background: var(--card);
+  box-shadow: var(--shadow-md);
+}
+.edit-card .eyebrow {
+  margin: 10px 0 2px;
+}
+.edit-preview {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding-bottom: 6px;
+}
+.edit-preview .avatar {
+  width: 56px;
+  height: 56px;
+  font-size: 26px;
+}
+.edit-preview strong {
+  font-size: 15px;
+  word-break: break-all;
+}
+.avatar-pick {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+}
+.avatar-option {
+  position: relative;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  aspect-ratio: 1;
+  min-height: 56px;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: #fbfcfe;
+  font-size: 26px;
+}
+.avatar-option.active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.22);
+}
+.avatar-upload {
+  display: grid;
+  gap: 2px;
+  color: var(--muted);
+}
+.avatar-upload small {
+  font-size: 11px;
+  font-weight: 800;
+}
+.avatar-upload .icon-svg {
+  width: 22px;
+  height: 22px;
+}
+
+/* 扁平质感渐变头像 */
+.avatar-preset {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(140deg, var(--g1), var(--g2));
+  color: #fff;
+  box-shadow: inset 0 2px 6px rgba(255, 255, 255, 0.45),
+    inset 0 -6px 14px rgba(0, 0, 0, 0.14);
+}
+.avatar-preset::before {
+  content: "";
+  position: absolute;
+  top: 8%;
+  left: 12%;
+  width: 55%;
+  height: 45%;
+  border-radius: 50%;
+  background: radial-gradient(circle at 30% 30%, rgba(255, 255, 255, 0.55), transparent 70%);
+  pointer-events: none;
+}
+.avatar-preset .icon-svg {
+  position: relative;
+  width: 52%;
+  height: 52%;
+  stroke-width: 2;
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.18));
+}
+
+/* 卡通插画头像铺满 */
+.avatar-art,
+.avatar-art .art-svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.avatar-art {
+  border-radius: inherit;
+  overflow: hidden;
+}
+.avatar .avatar-art {
+  border-radius: 50%;
+}
+
+/* 头像容器内的预设 / 上传图片铺满圆形 */
+.avatar {
+  overflow: hidden;
+}
+.avatar .avatar-preset {
+  border-radius: 50%;
+}
+.avatar-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: inherit;
+}
+
+/* ---------- 登录 / 注册页 ---------- */
+.auth-card {
+  display: grid;
+  gap: 12px;
+  margin-top: 8px;
+  padding: 24px 20px;
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  background: var(--card);
+  box-shadow: var(--shadow-md);
+}
+.auth-card h2 {
+  margin: 0;
+  font-size: 24px;
+}
+.auth-sub {
+  margin: 0 0 6px;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.5;
+}
+.auth-input {
+  width: 100%;
+  min-height: 48px;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #fbfcfe;
+  color: var(--ink);
+  font: inherit;
+  font-size: 16px;
+  transition: border-color 0.2s var(--ease), box-shadow 0.2s var(--ease);
+}
+.auth-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.14);
+}
+.auth-submit {
+  min-height: 48px;
+  margin-top: 4px;
+  font-size: 16px;
+  font-weight: 800;
+}
+.auth-switch {
+  min-height: 40px;
+  background: transparent;
+  color: var(--accent);
+  font-weight: 700;
+}
+
+/* ---------- 尊重减少动效偏好 ---------- */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
   }
 }

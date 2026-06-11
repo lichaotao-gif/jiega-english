@@ -182,12 +182,74 @@ const state = {
     level: "Travel Starter",
     avatar: "接"
   }),
-  loggedIn: localStorage.getItem("jiega:loggedIn") !== "false",
+  user: null,
+  loggedIn: false,
   todayCount: Number(localStorage.getItem("jiega:todayCount") || 0),
   dialogEnglishOnly: localStorage.getItem("jiega:dialogEnglishOnly") === "true"
 };
 
 let voiceReady = false;
+
+// 启动时恢复登录态并从云端拉取数据
+async function initAuth() {
+  if (typeof authGetUser !== "function") return;
+  const user = await authGetUser();
+  if (!user) return;
+  state.user = user;
+  state.loggedIn = true;
+  try {
+    const cloud = await cloudPull(user.id);
+    state.favorites = cloud.favorites;
+    state.mastered = cloud.mastered;
+    state.checkins = cloud.checkins;
+    state.profile = cloud.profile;
+    state.todayCount = cloud.todayCount;
+  } catch (e) {
+    console.warn("云端数据加载失败", e);
+  }
+  render();
+}
+
+// 登录成功后：合并本地数据上云 + 拉取云端
+async function afterLogin(user) {
+  if (!user) return;
+  state.user = user;
+  state.loggedIn = true;
+  try {
+    await cloudMergeLocal(user.id, {
+      favorites: state.favorites,
+      mastered: state.mastered,
+      checkins: state.checkins
+    });
+    const cloud = await cloudPull(user.id);
+    state.favorites = cloud.favorites;
+    state.mastered = cloud.mastered;
+    state.checkins = cloud.checkins;
+    state.profile = cloud.profile;
+    state.todayCount = cloud.todayCount;
+  } catch (e) {
+    console.warn("同步失败", e);
+  }
+  toast("已登录");
+  navigate("profile");
+}
+
+async function handleAuth(mode) {
+  const email = document.querySelector("#auth-email")?.value.trim();
+  const password = document.querySelector("#auth-pass")?.value || "";
+  if (!email || !password) { toast("请填写邮箱和密码"); return; }
+  if (password.length < 6) { toast("密码至少 6 位"); return; }
+  toast(mode === "register" ? "注册中…" : "登录中…");
+  const fn = mode === "register" ? authSignUp : authSignIn;
+  const { data, error } = await fn(email, password);
+  if (error) { toast(error.message || "操作失败，请重试"); return; }
+  if (mode === "register" && !data.session) {
+    toast("注册成功，请到邮箱点击验证链接后再登录");
+    navigate("auth/login");
+    return;
+  }
+  await afterLogin(data.user || (await authGetUser()));
+}
 
 window.addEventListener("hashchange", () => {
   state.route = parseRoute();
@@ -347,8 +409,12 @@ function isFavorite(id) {
 }
 
 function toggleFavorite(id) {
-  state.favorites = isFavorite(id) ? state.favorites.filter((entry) => entry !== id) : [...state.favorites, id];
+  const adding = !isFavorite(id);
+  state.favorites = adding ? [...state.favorites, id] : state.favorites.filter((entry) => entry !== id);
   save("jiega:favorites", state.favorites);
+  if (state.user) {
+    (adding ? cloudAddFavorite(state.user.id, id) : cloudRemoveFavorite(state.user.id, id)).catch(() => {});
+  }
   render();
 }
 
@@ -423,15 +489,19 @@ function markRead(id) {
   if (!state.mastered.includes(id)) {
     state.mastered = [...state.mastered, id];
     save("jiega:mastered", state.mastered);
+    if (state.user) cloudAddMastered(state.user.id, id).catch(() => {});
   }
+  if (state.user) cloudSetTodayCount(state.user.id, state.todayCount).catch(() => {});
   toast("已记录一次练习");
   render();
 }
 
 function checkIn() {
   const today = new Date().toISOString().slice(0, 10);
-  state.checkins[today] = Math.max(state.checkins[today] || 0, state.todayCount || 1);
+  const count = Math.max(state.checkins[today] || 0, state.todayCount || 1);
+  state.checkins[today] = count;
   save("jiega:checkins", state.checkins);
+  if (state.user) cloudSetCheckin(state.user.id, today, count).catch(() => {});
   navigate("result");
 }
 
@@ -468,19 +538,21 @@ function getProfileStats() {
   };
 }
 
-function accountAction(action) {
+async function accountAction(action) {
+  // 这些操作需要先登录
+  const needsAuth = ["edit-profile", "change-password"];
+  if (needsAuth.includes(action) && !state.loggedIn) {
+    toast("请先登录");
+    navigate("auth/login");
+    return;
+  }
   if (action === "edit-profile") {
-    const nextName = prompt("请输入新的昵称", state.profile.nickname);
-    if (!nextName) return;
-    state.profile.nickname = nextName.trim().slice(0, 16) || state.profile.nickname;
-    state.profile.avatar = state.profile.nickname.slice(0, 1);
-    save("jiega:profile", state.profile);
-    toast("个人信息已更新");
-    render();
+    state.draft = { nickname: state.profile.nickname, avatar: state.profile.avatar };
+    navigate("edit");
     return;
   }
   if (action === "change-password") {
-    toast("已进入更换密码流程");
+    navigate("password");
     return;
   }
   if (action === "settings") {
@@ -488,17 +560,15 @@ function accountAction(action) {
     return;
   }
   if (action === "login") {
-    state.loggedIn = true;
-    localStorage.setItem("jiega:loggedIn", "true");
-    toast("已登录");
-    render();
+    navigate("auth/login");
     return;
   }
   if (action === "logout") {
+    await authSignOut();
+    state.user = null;
     state.loggedIn = false;
-    localStorage.setItem("jiega:loggedIn", "false");
     toast("已退出登录");
-    render();
+    navigate("home");
   }
 }
 
@@ -534,6 +604,80 @@ function icon(name) {
   return `<svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true">${paths[name] || paths.book}</svg>`;
 }
 
+// 扁平化卡通头像（整张彩色 SVG，铺满圆形）
+function avatarArt(name) {
+  const arts = {
+    cat: '<circle cx="32" cy="32" r="32" fill="#FFB661"/><path d="M17 7l9 15H11z" fill="#FF9F3C"/><path d="M47 7l-9 15h15z" fill="#FF9F3C"/><circle cx="24" cy="31" r="3.4" fill="#3B2A1E"/><circle cx="40" cy="31" r="3.4" fill="#3B2A1E"/><path d="M28.5 39h7l-3.5 3.5z" fill="#E8746A"/><path d="M13 33h9M13 37h9M42 33h9M42 37h9" stroke="#fff" stroke-width="1.6" stroke-linecap="round"/>',
+    dog: '<circle cx="32" cy="32" r="32" fill="#CE935A"/><path d="M8 18c-3 13 2 21 11 22V24z" fill="#9E6638"/><path d="M56 18c3 13-2 21-11 22V24z" fill="#9E6638"/><circle cx="24" cy="30" r="3.4" fill="#3B2A1E"/><circle cx="40" cy="30" r="3.4" fill="#3B2A1E"/><ellipse cx="32" cy="40" rx="5" ry="4" fill="#F2EEE6"/><circle cx="32" cy="39" r="2.6" fill="#3B2A1E"/>',
+    bear: '<circle cx="16" cy="14" r="8" fill="#9A6A45"/><circle cx="48" cy="14" r="8" fill="#9A6A45"/><circle cx="32" cy="32" r="32" fill="#B07E54"/><circle cx="24" cy="30" r="3.2" fill="#3B2A1E"/><circle cx="40" cy="30" r="3.2" fill="#3B2A1E"/><ellipse cx="32" cy="42" rx="11" ry="9" fill="#E8D5BE"/><ellipse cx="32" cy="39" rx="3" ry="2.4" fill="#3B2A1E"/>',
+    panda: '<circle cx="16" cy="13" r="8" fill="#2B2B2B"/><circle cx="48" cy="13" r="8" fill="#2B2B2B"/><circle cx="32" cy="32" r="32" fill="#F4F4F4"/><ellipse cx="23" cy="31" rx="6" ry="7.5" fill="#2B2B2B"/><ellipse cx="41" cy="31" rx="6" ry="7.5" fill="#2B2B2B"/><circle cx="23" cy="32" r="2.4" fill="#fff"/><circle cx="41" cy="32" r="2.4" fill="#fff"/><circle cx="32" cy="42" r="2.6" fill="#2B2B2B"/>',
+    rabbit: '<ellipse cx="23" cy="12" rx="5.5" ry="14" fill="#F7CBD8"/><ellipse cx="41" cy="12" rx="5.5" ry="14" fill="#F7CBD8"/><ellipse cx="23" cy="12" rx="2.6" ry="9" fill="#FBE3EA"/><ellipse cx="41" cy="12" rx="2.6" ry="9" fill="#FBE3EA"/><circle cx="32" cy="36" r="26" fill="#FDEFF3"/><circle cx="25" cy="34" r="3" fill="#3B2A1E"/><circle cx="39" cy="34" r="3" fill="#3B2A1E"/><path d="M30 42h4l-2 2z" fill="#E8746A"/>',
+    fox: '<circle cx="32" cy="32" r="32" fill="#FF8A4C"/><path d="M10 8l14 12-10 6z" fill="#E2622C"/><path d="M54 8L40 20l10 6z" fill="#E2622C"/><path d="M32 28L14 26l8 18 10 8 10-8 8-18z" fill="#FFF3EA"/><circle cx="24" cy="30" r="3.2" fill="#3B2A1E"/><circle cx="40" cy="30" r="3.2" fill="#3B2A1E"/><path d="M29 42h6l-3 3z" fill="#3B2A1E"/>',
+    penguin: '<circle cx="32" cy="32" r="32" fill="#3C4658"/><path d="M32 16c10 0 16 9 16 22 0 6-7 10-16 10s-16-4-16-10c0-13 6-22 16-22z" fill="#F4F6FA"/><circle cx="25" cy="28" r="3" fill="#2B2B2B"/><circle cx="39" cy="28" r="3" fill="#2B2B2B"/><path d="M28 33h8l-4 5z" fill="#FF9F3C"/>',
+    chick: '<circle cx="32" cy="32" r="32" fill="#FFD24C"/><circle cx="24" cy="29" r="3.2" fill="#3B2A1E"/><circle cx="40" cy="29" r="3.2" fill="#3B2A1E"/><path d="M28 35h8l-4 5z" fill="#FF9F3C"/><path d="M8 30q8-4 14 2M56 30q-8-4-14 2" stroke="#FFC21E" stroke-width="2.4" fill="none" stroke-linecap="round"/>',
+    boy: '<circle cx="32" cy="32" r="32" fill="#FFCEA0"/><path d="M8 26c0-14 10-22 24-22s24 8 24 22c-6-4-10-5-16-5-3 0-5-3-8-3s-5 3-8 3c-6 0-10 1-16 5z" fill="#5B3A29"/><circle cx="24" cy="33" r="3.2" fill="#3B2A1E"/><circle cx="40" cy="33" r="3.2" fill="#3B2A1E"/><path d="M26 43q6 5 12 0" stroke="#B5654A" stroke-width="2.4" fill="none" stroke-linecap="round"/>',
+    girl: '<circle cx="32" cy="32" r="32" fill="#FFCEA0"/><path d="M6 40C6 18 16 4 32 4s26 14 26 36c-4 0-7-2-7-8 0-10-6-16-19-16S13 22 13 32c0 6-3 8-7 8z" fill="#7A4A2E"/><circle cx="9" cy="40" r="6" fill="#7A4A2E"/><circle cx="55" cy="40" r="6" fill="#7A4A2E"/><circle cx="24" cy="34" r="3.2" fill="#3B2A1E"/><circle cx="40" cy="34" r="3.2" fill="#3B2A1E"/><path d="M27 43q5 4 10 0" stroke="#B5654A" stroke-width="2.4" fill="none" stroke-linecap="round"/><circle cx="20" cy="40" r="2.4" fill="#FF9FB0"/><circle cx="44" cy="40" r="2.4" fill="#FF9FB0"/>'
+  };
+  return `<span class="avatar-art"><svg viewBox="0 0 64 64" class="art-svg">${arts[name] || ""}</svg></span>`;
+}
+
+const AVATAR_PRESETS = [
+  { id: "a-boy", art: "boy" },
+  { id: "a-girl", art: "girl" },
+  { id: "a-cat", art: "cat" },
+  { id: "a-dog", art: "dog" },
+  { id: "a-bear", art: "bear" },
+  { id: "a-panda", art: "panda" },
+  { id: "a-rabbit", art: "rabbit" },
+  { id: "a-fox", art: "fox" },
+  { id: "a-penguin", art: "penguin" },
+  { id: "a-chick", art: "chick" },
+  { id: "p-plane", icon: "plane", grad: ["#6a8dff", "#9a6cff"] },
+  { id: "p-hotel", icon: "hotel", grad: ["#7b6cf6", "#c06cf6"] },
+  { id: "p-food", icon: "utensils", grad: ["#ff8a5b", "#ff5f6d"] },
+  { id: "p-bag", icon: "bag", grad: ["#33c2ff", "#3a7bd5"] },
+  { id: "p-ticket", icon: "ticket", grad: ["#2dd4a7", "#22b07d"] },
+  { id: "p-star", icon: "star", grad: ["#ffc46b", "#ff9d3c"] }
+];
+
+// 把 avatar 字段渲染成内容：上传图片 / 卡通插画 / 预设渐变 / 文字
+function avatarMarkup(value) {
+  if (typeof value === "string" && value.startsWith("data:")) {
+    return `<img class="avatar-img" src="${value}" alt="头像" />`;
+  }
+  const preset = AVATAR_PRESETS.find((p) => p.id === value);
+  if (preset && preset.art) {
+    return avatarArt(preset.art);
+  }
+  if (preset) {
+    return `<span class="avatar-preset" style="--g1:${preset.grad[0]};--g2:${preset.grad[1]}">${icon(preset.icon)}</span>`;
+  }
+  return value || "接";
+}
+
+function handleAvatarUpload(e) {
+  const file = e.target.files?.[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    const img = new Image();
+    img.onload = () => {
+      const size = 160;
+      const canvas = document.createElement("canvas");
+      canvas.width = canvas.height = size;
+      const ctx = canvas.getContext("2d");
+      const scale = Math.max(size / img.width, size / img.height);
+      const w = img.width * scale;
+      const h = img.height * scale;
+      ctx.drawImage(img, (size - w) / 2, (size - h) / 2, w, h);
+      const data = canvas.toDataURL("image/jpeg", 0.82);
+      if (state.draft) { state.draft.avatar = data; render(); }
+    };
+    img.src = reader.result;
+  };
+  reader.readAsDataURL(file);
+}
+
 function render() {
   const app = document.querySelector("#app");
   const { page } = state.route;
@@ -545,7 +689,10 @@ function render() {
     practice: Practice,
     result: Result,
     profile: Profile,
-    settings: Settings
+    settings: Settings,
+    auth: Auth,
+    edit: EditProfile,
+    password: ChangePassword
   };
   app.innerHTML = `${(pages[page] || Home)()}${Nav()}`;
   bind();
@@ -559,7 +706,6 @@ function Home() {
         <h1>接嘎</h1>
         <p>接住尴尬，开口不尴尬</p>
       </div>
-      <div class="brand-mark">${icon("volume")}</div>
     </section>
     <section class="headline">
       <h2>今天想接住哪个尴尬场景？</h2>
@@ -788,11 +934,33 @@ function Result() {
 
 function Profile() {
   const stats = getProfileStats();
+  if (!state.loggedIn) {
+    return shell(`
+      <section class="profile-card" data-go="auth/login">
+        <div class="avatar">?</div>
+        <div>
+          <p>未登录</p>
+          <h2>登录 / 注册</h2>
+          <span>登录后收藏与打卡云端同步，换设备不丢</span>
+        </div>
+        <button data-go="auth/login">登录</button>
+      </section>
+      <section class="profile-stats">
+        ${stat("今日练习", stats.todayPractice, "次")}
+        ${stat("连续打卡", stats.streakDays, "天")}
+        ${stat("已收藏", stats.favorites, "条")}
+        ${stat("已掌握", stats.mastered, "条")}
+      </section>
+      <section class="settings-list profile-menu">
+        ${settingRow("settings", "设置", "账号安全、通知、偏好设置", "gear", "settings")}
+      </section>
+    `);
+  }
   return shell(`
     <section class="profile-card">
-      <div class="avatar">${state.profile.avatar}</div>
+      <div class="avatar" data-account-action="edit-profile">${avatarMarkup(state.profile.avatar)}</div>
       <div>
-        <p>${state.loggedIn ? "已登录" : "未登录"}</p>
+        <p>已登录</p>
         <h2>${state.profile.nickname}</h2>
         <span>${state.profile.account} · ${state.profile.level}</span>
       </div>
@@ -806,6 +974,91 @@ function Profile() {
     </section>
     <section class="settings-list profile-menu">
       ${settingRow("settings", "设置", "账号安全、通知、偏好设置", "gear", "settings")}
+    </section>
+  `);
+}
+
+function EditProfile() {
+  if (!state.loggedIn) { return shell(`${TopBack("个人信息")}${Empty("请先登录", "登录后才能编辑资料。")}`); }
+  if (!state.draft) state.draft = { nickname: state.profile.nickname, avatar: state.profile.avatar };
+  return shell(`
+    ${TopBack("个人信息")}
+    <section class="edit-card">
+      <div class="edit-preview">
+        <div class="avatar">${avatarMarkup(state.draft.avatar)}</div>
+        <div>
+          <p class="eyebrow">当前账号</p>
+          <strong>${state.user?.email || state.profile.account}</strong>
+        </div>
+      </div>
+      <p class="eyebrow">选择头像</p>
+      <div class="avatar-pick">
+        ${AVATAR_PRESETS.map((p) => `<button class="avatar-option ${state.draft.avatar === p.id ? "active" : ""}" data-avatar="${p.id}">${avatarMarkup(p.id)}</button>`).join("")}
+        <label class="avatar-option avatar-upload ${typeof state.draft.avatar === "string" && state.draft.avatar.startsWith("data:") ? "active" : ""}">
+          ${typeof state.draft.avatar === "string" && state.draft.avatar.startsWith("data:") ? avatarMarkup(state.draft.avatar) : `${icon("user")}<small>上传</small>`}
+          <input type="file" accept="image/*" data-avatar-upload hidden />
+        </label>
+      </div>
+      <p class="eyebrow">昵称</p>
+      <input id="edit-nickname" class="auth-input" data-draft-nickname value="${state.draft.nickname}" maxlength="16" placeholder="输入昵称" />
+      <button class="primary auth-submit" data-save-profile>保存</button>
+    </section>
+  `);
+}
+
+function ChangePassword() {
+  if (!state.loggedIn) { return shell(`${TopBack("更换密码")}${Empty("请先登录", "登录后才能修改密码。")}`); }
+  const email = state.user?.email || "";
+  return shell(`
+    ${TopBack("更换密码")}
+    <section class="auth-card">
+      <h2>更换密码</h2>
+      <p class="auth-sub">账号：<b>${email}</b></p>
+      <input id="pw-new" class="auth-input" type="password" placeholder="输入新密码（至少 6 位）" autocomplete="new-password" />
+      <input id="pw-confirm" class="auth-input" type="password" placeholder="再次输入新密码" autocomplete="new-password" />
+      <button class="primary auth-submit" data-reset-pw>确认修改</button>
+    </section>
+  `);
+}
+
+function saveProfile() {
+  const input = document.querySelector("#edit-nickname");
+  const nickname = ((state.draft?.nickname ?? input?.value) || "").trim().slice(0, 16) || "旅行学习者";
+  const avatar = state.draft?.avatar || nickname.slice(0, 1);
+  state.profile.nickname = nickname;
+  state.profile.avatar = avatar;
+  save("jiega:profile", state.profile);
+  if (state.user) cloudUpdateProfile(state.user.id, { nickname, avatar }).catch(() => {});
+  state.draft = null;
+  toast("已保存");
+  navigate("profile");
+}
+
+async function confirmNewPassword() {
+  const newPass = document.querySelector("#pw-new")?.value || "";
+  const confirm = document.querySelector("#pw-confirm")?.value || "";
+  if (newPass.length < 6) { toast("新密码至少 6 位"); return; }
+  if (newPass !== confirm) { toast("两次输入的密码不一致"); return; }
+  toast("修改中…");
+  const { error } = await sb.auth.updateUser({ password: newPass });
+  if (error) { toast(error.message || "修改失败"); return; }
+  toast("密码已更新");
+  navigate("profile");
+}
+
+function Auth() {
+  const mode = state.route.a === "register" ? "register" : "login";
+  return shell(`
+    ${TopBack(mode === "register" ? "注册" : "登录")}
+    <section class="auth-card">
+      <h2>${mode === "register" ? "注册接嘎账号" : "欢迎回来"}</h2>
+      <p class="auth-sub">${mode === "register" ? "注册后收藏与打卡云端同步，换设备也不丢" : "登录后同步你的收藏与学习进度"}</p>
+      <input id="auth-email" class="auth-input" type="email" placeholder="邮箱" autocomplete="email" />
+      <input id="auth-pass" class="auth-input" type="password" placeholder="密码（至少 6 位）" autocomplete="${mode === "register" ? "new-password" : "current-password"}" />
+      <button class="primary auth-submit" data-auth="${mode}">${mode === "register" ? "注册" : "登录"}</button>
+      <button class="auth-switch" data-go="auth/${mode === "register" ? "login" : "register"}">
+        ${mode === "register" ? "已有账号？去登录" : "还没有账号？去注册"}
+      </button>
     </section>
   `);
 }
@@ -881,7 +1134,11 @@ function toast(text) {
 
 function bind() {
   document.querySelectorAll("[data-go]").forEach((el) => el.addEventListener("click", () => navigate(el.dataset.go)));
-  document.querySelectorAll("[data-back]").forEach((el) => el.addEventListener("click", () => history.back()));
+  document.querySelectorAll("[data-back]").forEach((el) => el.addEventListener("click", () => {
+    const before = location.hash;
+    history.back();
+    setTimeout(() => { if (location.hash === before) navigate("home"); }, 80);
+  }));
   document.querySelectorAll("[data-dialog-lang]").forEach((el) => el.addEventListener("click", toggleDialogLanguage));
   document.querySelectorAll("[data-fav]").forEach((el) => el.addEventListener("click", () => toggleFavorite(el.dataset.fav)));
   document.querySelectorAll("[data-speak]").forEach((el) => el.addEventListener("click", () => speak(speechText(getEntry(el.dataset.speak)))));
@@ -890,6 +1147,12 @@ function bind() {
   document.querySelectorAll("[data-checkin]").forEach((el) => el.addEventListener("click", checkIn));
   document.querySelectorAll("[data-account-action]").forEach((el) => el.addEventListener("click", () => accountAction(el.dataset.accountAction)));
   document.querySelectorAll("[data-toast]").forEach((el) => el.addEventListener("click", () => toast(`${el.dataset.toast}暂未开放`)));
+  document.querySelectorAll("[data-auth]").forEach((el) => el.addEventListener("click", () => handleAuth(el.dataset.auth)));
+  document.querySelectorAll("[data-avatar]").forEach((el) => el.addEventListener("click", () => { if (state.draft) { state.draft.avatar = el.dataset.avatar; render(); } }));
+  document.querySelectorAll("[data-draft-nickname]").forEach((el) => el.addEventListener("input", (e) => { if (state.draft) state.draft.nickname = e.target.value; }));
+  document.querySelectorAll("[data-avatar-upload]").forEach((el) => el.addEventListener("change", handleAvatarUpload));
+  document.querySelectorAll("[data-save-profile]").forEach((el) => el.addEventListener("click", saveProfile));
+  document.querySelectorAll("[data-reset-pw]").forEach((el) => el.addEventListener("click", confirmNewPassword));
   document.querySelectorAll("[data-flip-button], [data-flip]").forEach((el) => el.addEventListener("click", () => document.querySelector("[data-flip]")?.classList.toggle("show-back")));
 }
 
@@ -1279,3 +1542,4 @@ function sentenceFrames(sceneId) {
 
 if (!location.hash) location.hash = "#/home";
 render();
+initAuth();
