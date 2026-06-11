@@ -234,6 +234,20 @@ async function afterLogin(user) {
   navigate("profile");
 }
 
+// 把 Supabase 的英文报错转成友好的中文提示
+function authErrorMessage(error, mode) {
+  const msg = (error?.message || "").toLowerCase();
+  if (msg.includes("invalid login credentials")) return "账号或密码错误";
+  if (msg.includes("email not confirmed")) return "邮箱尚未验证，请先到邮箱完成验证";
+  if (msg.includes("already registered") || msg.includes("already been registered")) return "该邮箱已注册，请直接登录";
+  if (msg.includes("signups not allowed") || msg.includes("signups are disabled")) return "当前未开放注册";
+  if (msg.includes("unable to validate email") || msg.includes("invalid email")) return "邮箱格式不正确";
+  if (msg.includes("password should be at least")) return "密码至少 6 位";
+  if (msg.includes("rate limit") || msg.includes("too many")) return "操作太频繁，请稍后再试";
+  if (msg.includes("network") || msg.includes("fetch")) return "网络异常，请检查网络后重试";
+  return mode === "register" ? "注册失败，请重试" : "登录失败，请重试";
+}
+
 async function handleAuth(mode) {
   const email = document.querySelector("#auth-email")?.value.trim();
   const password = document.querySelector("#auth-pass")?.value || "";
@@ -242,7 +256,7 @@ async function handleAuth(mode) {
   toast(mode === "register" ? "注册中…" : "登录中…");
   const fn = mode === "register" ? authSignUp : authSignIn;
   const { data, error } = await fn(email, password);
-  if (error) { toast(error.message || "操作失败，请重试"); return; }
+  if (error) { toast(authErrorMessage(error, mode)); return; }
   if (mode === "register" && !data.session) {
     toast("注册成功，请到邮箱点击验证链接后再登录");
     navigate("auth/login");
@@ -694,7 +708,9 @@ function render() {
     edit: EditProfile,
     password: ChangePassword
   };
-  app.innerHTML = `${(pages[page] || Home)()}${Nav()}`;
+  const showNav = ["home", "practice", "favorites", "profile"].includes(page);
+  app.innerHTML = `${(pages[page] || Home)()}${showNav ? Nav() : ""}`;
+  if (!showNav) document.querySelector(".screen")?.classList.add("no-nav");
   bind();
 }
 
@@ -960,7 +976,6 @@ function Profile() {
     <section class="profile-card">
       <div class="avatar" data-account-action="edit-profile">${avatarMarkup(state.profile.avatar)}</div>
       <div>
-        <p>已登录</p>
         <h2>${state.profile.nickname}</h2>
         <span>${state.profile.account} · ${state.profile.level}</span>
       </div>
@@ -984,14 +999,15 @@ function EditProfile() {
   return shell(`
     ${TopBack("个人信息")}
     <section class="edit-card">
-      <div class="edit-preview">
+      <p class="eyebrow">当前账号</p>
+      <strong class="edit-email">${state.user?.email || state.profile.account}</strong>
+      <p class="eyebrow">昵称</p>
+      <input id="edit-nickname" class="auth-input" data-draft-nickname value="${state.draft.nickname}" maxlength="16" placeholder="输入昵称" />
+      <p class="eyebrow">头像</p>
+      <div class="avatar-current">
         <div class="avatar">${avatarMarkup(state.draft.avatar)}</div>
-        <div>
-          <p class="eyebrow">当前账号</p>
-          <strong>${state.user?.email || state.profile.account}</strong>
-        </div>
+        <span>当前头像</span>
       </div>
-      <p class="eyebrow">选择头像</p>
       <div class="avatar-pick">
         ${AVATAR_PRESETS.map((p) => `<button class="avatar-option ${state.draft.avatar === p.id ? "active" : ""}" data-avatar="${p.id}">${avatarMarkup(p.id)}</button>`).join("")}
         <label class="avatar-option avatar-upload ${typeof state.draft.avatar === "string" && state.draft.avatar.startsWith("data:") ? "active" : ""}">
@@ -999,8 +1015,6 @@ function EditProfile() {
           <input type="file" accept="image/*" data-avatar-upload hidden />
         </label>
       </div>
-      <p class="eyebrow">昵称</p>
-      <input id="edit-nickname" class="auth-input" data-draft-nickname value="${state.draft.nickname}" maxlength="16" placeholder="输入昵称" />
       <button class="primary auth-submit" data-save-profile>保存</button>
     </section>
   `);

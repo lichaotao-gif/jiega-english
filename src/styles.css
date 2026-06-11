@@ -1272,7 +1272,33 @@ button:focus:not(:focus-visible) {
   cursor: pointer;
 }
 
+/* 无底部导航的页面，去掉为导航预留的空白 */
+.screen.no-nav {
+  padding-bottom: 28px;
+}
+
 /* ---------- 资料编辑页 ---------- */
+.edit-email {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 16px;
+  word-break: break-all;
+}
+.avatar-current {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 4px;
+}
+.avatar-current .avatar {
+  width: 56px;
+  height: 56px;
+  font-size: 26px;
+}
+.avatar-current span {
+  color: var(--muted);
+  font-size: 13px;
+}
 .edit-card {
   display: grid;
   gap: 10px;
